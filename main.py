@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import auth, habits, goals, dashboard, analytics
+from routes import auth, habits, goals, dashboard, analytics, personal, food, meal_plan, recipe
 from config.database import init_db
 
 # Initialize database tables
@@ -12,12 +12,12 @@ app = FastAPI(
     version="1.1.0"
 )
 
-# CORS middleware
+# CORS middleware — allow all localhost origins for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, replace with specific origins
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,  # Using Bearer tokens, not cookies
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -27,6 +27,12 @@ app.include_router(habits.router)
 app.include_router(goals.router)
 app.include_router(dashboard.router)
 app.include_router(analytics.router)
+app.include_router(personal.router)
+app.include_router(personal.calorie_router)
+app.include_router(personal.period_router)
+app.include_router(food.router)
+app.include_router(meal_plan.router)
+app.include_router(recipe.router)
 
 @app.get("/")
 async def root():

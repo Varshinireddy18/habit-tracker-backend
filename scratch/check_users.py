@@ -16,7 +16,7 @@ engine = create_engine(DATABASE_URL)
 
 def check_users():
     with engine.connect() as connection:
-        result = connection.execute(text("SELECT id, name, total_habits FROM users"))
+        result = connection.execute(text("SELECT id, name, email, total_habits FROM users"))
         for row in result:
             print(f"User: {row[1]} (ID: {row[0]}), total_habits: {row[2]}")
 

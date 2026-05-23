@@ -28,7 +28,8 @@ async def register(user: UserRegister, db: Session = Depends(get_db)):
             password_hash=hashed_password,
             joined_date=datetime.now().strftime("%Y-%m-%d"),
             total_habits=0,
-            current_streak=0
+            current_streak=0,
+            gender=user.gender
         )
         
         db.add(new_user)
@@ -65,7 +66,16 @@ async def get_profile(uid: str = Depends(get_current_user), db: Session = Depend
         email=user.email,
         joined_date=user.joined_date,
         total_habits=user.total_habits,
-        current_streak=user.current_streak
+        current_streak=user.current_streak,
+        gender=user.gender,
+        height=user.height,
+        weight=user.weight,
+        daily_calorie_goal=user.daily_calorie_goal,
+        step_goal=user.step_goal,
+        diet_type=user.diet_type,
+        allergies=user.allergies,
+        daily_protein_goal=user.daily_protein_goal,
+        water_goal_glasses=user.water_goal_glasses,
     )
 
 @router.put("/profile", response_model=dict)
@@ -76,13 +86,30 @@ async def update_profile(profile_data: UserProfileUpdate, uid: str = Depends(get
     
     if profile_data.name:
         user.name = profile_data.name
+    if profile_data.gender is not None:
+        user.gender = profile_data.gender
     if profile_data.email:
-        # Check if email taken
         if profile_data.email != user.email:
             existing = db.query(User).filter(User.email == profile_data.email).first()
             if existing:
                 raise HTTPException(status_code=400, detail="Email already taken")
             user.email = profile_data.email
+    if profile_data.height is not None:
+        user.height = profile_data.height
+    if profile_data.weight is not None:
+        user.weight = profile_data.weight
+    if profile_data.daily_calorie_goal is not None:
+        user.daily_calorie_goal = profile_data.daily_calorie_goal
+    if profile_data.step_goal is not None:
+        user.step_goal = profile_data.step_goal
+    if profile_data.diet_type is not None:
+        user.diet_type = profile_data.diet_type
+    if profile_data.allergies is not None:
+        user.allergies = profile_data.allergies
+    if profile_data.daily_protein_goal is not None:
+        user.daily_protein_goal = profile_data.daily_protein_goal
+    if profile_data.water_goal_glasses is not None:
+        user.water_goal_glasses = profile_data.water_goal_glasses
             
     db.commit()
     return {"message": "Profile updated successfully"}

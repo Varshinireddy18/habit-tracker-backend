@@ -50,8 +50,8 @@ class HabitService:
             else:
                 break
         
-        # Calculate longest streak
-        all_dates = sorted([datetime.strptime(d, "%Y-%m-%d").date() for d in completed_dates])
+        # Calculate longest streak - use set to ensure unique dates
+        all_dates = sorted(list(set([datetime.strptime(d, "%Y-%m-%d").date() for d in completed_dates])))
         longest_streak = 0
         temp_streak = 0
         if all_dates:
@@ -86,6 +86,13 @@ class HabitService:
             habit.progress_percentage = progress
             habit.completed_days_count = completed_days_count
             
+            # Sync user's global streak (max of all habits)
+            from sqlalchemy import func
+            max_streak = db.query(func.max(Habit.current_streak)).filter(Habit.user_id == user_id).scalar() or 0
+            user = db.query(User).filter(User.id == user_id).first()
+            if user:
+                user.current_streak = max_streak
+
             db.commit()
             return True
         return False

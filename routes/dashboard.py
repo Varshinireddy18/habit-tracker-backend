@@ -44,7 +44,8 @@ async def get_dashboard(uid: str = Depends(get_current_user), db: Session = Depe
         current_streak = stats.max_streak or 0
         
         pending_today = total_habits - completed_today
-        overall_progress = int(round(total_progress / total_habits))
+        overall_progress = int(round((completed_today / total_habits) * 100))
+        monthly_progress = int(round(total_progress / total_habits)) # Move previous logic to monthly
         
         # 4. Weekly Progress (Maintaining original mock data as requested by UI requirements)
         weekly_progress = [70, 80, 90, 100]
@@ -56,7 +57,7 @@ async def get_dashboard(uid: str = Depends(get_current_user), db: Session = Depe
             overall_progress=overall_progress,
             current_streak=current_streak,
             weekly_progress=weekly_progress,
-            monthly_progress=overall_progress
+            monthly_progress=monthly_progress
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
