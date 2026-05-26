@@ -15,12 +15,12 @@ app = FastAPI(
     version="1.1.0"
 )
 
-# CORS middleware — allow all localhost origins for local development
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # Using Bearer tokens, not cookies
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
