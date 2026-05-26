@@ -4,8 +4,11 @@ from routes import auth, habits, goals, dashboard, analytics, personal, food, me
 from config.database import init_db
 
 # Initialize database tables
-init_db()
-
+try:
+    init_db()
+    print("Database connected successfully")
+except Exception as e:
+    print("Database connection failed:", e)
 app = FastAPI(
     title="Habit Tracker & Goal Planner API",
     description="MySQL-powered backend for premium productivity dashboard",
