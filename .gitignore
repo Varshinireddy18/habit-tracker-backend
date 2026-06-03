@@ -3,3 +3,4 @@ serviceAccountKey.json
 .venv/
 __pycache__/
 *.pyc
+test_gemini.py
