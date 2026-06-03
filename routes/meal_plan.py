@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
 from config.database import get_db, MealPlan
 from utils.dependencies import get_current_user
-from config.gemini import model
+from config.gemini import client
 import json
 
 router = APIRouter(
@@ -70,7 +70,10 @@ async def generate_meal_plan(
         Generate all 7 days.
         """
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+    model="gemini-2.5-flash",
+    contents=prompt
+)
 
         text = response.text.strip()
 
