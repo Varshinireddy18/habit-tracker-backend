@@ -94,3 +94,19 @@ class HealthProfileUpdate(BaseModel):
     daily_protein_goal: Optional[float] = None
     water_goal_glasses: Optional[int] = None
     allergies: Optional[str] = None
+
+class AiScanResponse(BaseModel):
+    food_name: str
+    calories: int
+    protein: float
+    carbs: float
+    fat: float
+    serving_size: str
+    confidence: str  # e.g. "High", "Medium", "Low"
+
+class ScanCreditsResponse(BaseModel):
+    scan_credits: int
+    message: str
+
+class BuyScansRequest(BaseModel):
+    quantity: int = 1  # number of scans to buy (1 scan = ₹5)

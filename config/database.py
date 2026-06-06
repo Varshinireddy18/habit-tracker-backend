@@ -32,6 +32,7 @@ class User(Base):
     diet_type = Column(String(20), default="Veg")      # 'Veg', 'Non-Veg', 'Vegan'
     allergies = Column(String(255), nullable=True)      # Comma separated
     step_goal = Column(Integer, default=10000)
+    scan_credits = Column(Integer, default=3)
     
     habits = relationship("Habit", back_populates="owner")
     goals = relationship("Goal", back_populates="owner")
