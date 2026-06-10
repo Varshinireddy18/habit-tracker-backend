@@ -1,0 +1,9 @@
+# Pyrefly configuration for the Backend package.
+# Placing this file here makes Pyrefly use Backend/ as the project root,
+# so imports like `from config.database import ...` resolve correctly.
+
+[python]
+venv_path = ".venv"
+
+[check]
+ignore_missing_source = true

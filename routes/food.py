@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy.sql.expression import func
+from google.genai import types
+from typing import List, Optional, cast
 from config.database import get_db, User, Food, FoodLog, WaterLog
 from schemas.food import (
     FoodResponse, FoodLogCreate, FoodLogResponse,
@@ -11,6 +13,10 @@ from utils.dependencies import get_current_user
 from datetime import datetime
 import json
 import base64
+import os
+import hashlib
+import asyncio
+import random
 from config.gemini import client
 
 router = APIRouter(prefix="/food", tags=["Food Tracking"])
@@ -39,7 +45,6 @@ async def get_suggestions(
     diet: str,
     db: Session = Depends(get_db)
 ):
-    from sqlalchemy.sql.expression import func
     # Suggest foods that are within remaining calories
     query = db.query(Food).filter(Food.calories <= remaining_cal)
     
@@ -99,17 +104,20 @@ async def get_nutrition_summary(
     total_protein = sum(log.protein for log in logs)
     total_carbs = sum(log.carbs for log in logs)
     total_fat = sum(log.fat for log in logs)
-    
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     return NutritionSummary(
-        total_calories=total_cal,
-        calorie_goal=user.daily_calorie_goal,
-        total_protein=total_protein,
-        protein_goal=user.daily_protein_goal,
-        total_carbs=total_carbs,
-        total_fat=total_fat,
+        total_calories=cast(int, total_cal),
+        calorie_goal=cast(int, user.daily_calorie_goal),
+        total_protein=cast(float, total_protein),
+        protein_goal=cast(float, user.daily_protein_goal),
+        total_carbs=cast(float, total_carbs),
+        total_fat=cast(float, total_fat),
         total_fiber=0.0, # Placeholder
-        water_glasses=total_water,
-        water_goal=user.water_goal_glasses,
+        water_glasses=cast(int, total_water),
+        water_goal=cast(int, user.water_goal_glasses),
         logs=logs
     )
 
@@ -140,11 +148,11 @@ async def update_health_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    if data.diet_type: user.diet_type = data.diet_type
-    if data.daily_calorie_goal: user.daily_calorie_goal = data.daily_calorie_goal
-    if data.daily_protein_goal: user.daily_protein_goal = data.daily_protein_goal
-    if data.water_goal_glasses: user.water_goal_glasses = data.water_goal_glasses
-    if data.allergies: user.allergies = data.allergies
+    if data.diet_type: setattr(user, "diet_type", data.diet_type)
+    if data.daily_calorie_goal: setattr(user, "daily_calorie_goal", data.daily_calorie_goal)
+    if data.daily_protein_goal: setattr(user, "daily_protein_goal", data.daily_protein_goal)
+    if data.water_goal_glasses: setattr(user, "water_goal_glasses", data.water_goal_glasses)
+    if data.allergies: setattr(user, "allergies", data.allergies)
     
     db.commit()
     return {"message": "Health profile updated"}
@@ -157,9 +165,10 @@ async def get_scan_credits(uid: str = Depends(get_current_user), db: Session = D
     user = db.query(User).filter(User.id == uid).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    credits = cast(int, user.scan_credits or 0)
     return ScanCreditsResponse(
-        scan_credits=user.scan_credits or 0,
-        message=f"You have {user.scan_credits or 0} scan(s) remaining."
+        scan_credits=credits,
+        message=f"You have {credits} scan(s) remaining."
     )
 
 @router.post("/scan/buy", response_model=ScanCreditsResponse)
@@ -179,12 +188,14 @@ async def buy_scan_credits(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user.scan_credits = (user.scan_credits or 0) + body.quantity
+    new_credits = cast(int, user.scan_credits or 0) + body.quantity
+    setattr(user, "scan_credits", new_credits)
     db.commit()
     db.refresh(user)
+    final_credits = cast(int, user.scan_credits or 0)
     return ScanCreditsResponse(
-        scan_credits=user.scan_credits,
-        message=f"Purchase successful! You now have {user.scan_credits} scan(s). (₹{body.quantity * 5} charged)"
+        scan_credits=final_credits,
+        message=f"Purchase successful! You now have {final_credits} scan(s). (₹{body.quantity * 5} charged)"
     )
 
 @router.post("/scan/analyze", response_model=AiScanResponse)
@@ -213,19 +224,25 @@ async def analyze_food_image(
 
     mime_type = image.content_type or "image/jpeg"
 
-    prompt = """You are a professional nutritionist and food recognition AI.
-Analyze this food image and provide accurate nutritional information.
+    # Hash the image so each unique photo produces a unique prompt
+    # (prevents Gemini from returning a cached identical response)
+    image_hash = hashlib.sha256(image_bytes).hexdigest()[:16]
+
+    prompt = f"""You are a professional nutritionist and food recognition AI.
+Analyze THIS SPECIFIC food image (image-id: {image_hash}) carefully and provide accurate nutritional information for exactly what you see.
+
+Do NOT guess or return generic values — analyze the actual food visible in the image.
 
 Respond ONLY with a valid JSON object in this exact format (no markdown, no explanation):
-{
-  "food_name": "Name of the food dish",
+{{
+  "food_name": "Exact name of the food dish you see",
   "calories": 350,
   "protein": 15.5,
   "carbs": 42.0,
   "fat": 12.3,
-  "serving_size": "1 medium bowl (250g)",
+  "serving_size": "Estimated serving size (e.g. 1 medium bowl 250g)",
   "confidence": "High"
-}
+}}
 
 Rules:
 - calories must be an integer
@@ -235,9 +252,6 @@ Rules:
 - Do NOT include markdown code blocks, only raw JSON"""
 
     try:
-        from google.genai import types
-        # Check if they are using a placeholder key
-        import os
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key or api_key == "YOUR_ACTUAL_API_KEY":
             raise Exception("Using placeholder API key")
@@ -252,7 +266,10 @@ Rules:
             ]
         )
 
-        raw = response.text.strip()
+        raw_text = response.text
+        if raw_text is None:
+            raise ValueError("Empty response from Gemini API")
+        raw = raw_text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -263,40 +280,48 @@ Rules:
     except Exception as e:
         # Fallback Mock Response for Demo Purposes if API fails or key is missing
         print(f"AI API Failed, using Mock Data: {e}")
-        import asyncio
-        import random
-        await asyncio.sleep(1.5) # Simulate processing time
-        
+        await asyncio.sleep(1.5)  # Simulate processing time
+
+        # Seed random with image hash so DIFFERENT photos → DIFFERENT mock results
+        seed = int(image_hash, 16) % (2**32)
+        rng = random.Random(seed)
+
         mock_foods = [
-            {"food_name": "Healthy Chicken Salad (Mock Data)", "calories": 320, "protein": 28.5, "carbs": 12.0, "fat": 15.0},
-            {"food_name": "Paneer Butter Masala & Naan (Mock Data)", "calories": 550, "protein": 18.0, "carbs": 45.0, "fat": 32.0},
-            {"food_name": "Masala Dosa (Mock Data)", "calories": 350, "protein": 8.0, "carbs": 55.0, "fat": 10.0},
-            {"food_name": "Avocado Toast with Egg (Mock Data)", "calories": 280, "protein": 14.0, "carbs": 22.0, "fat": 16.0},
-            {"food_name": "Chicken Biryani (Mock Data)", "calories": 600, "protein": 25.0, "carbs": 70.0, "fat": 20.0},
-            {"food_name": "Fruit Smoothie Bowl (Mock Data)", "calories": 250, "protein": 5.0, "carbs": 50.0, "fat": 4.0}
+            {"food_name": "Healthy Chicken Salad (Demo)",       "calories": 320, "protein": 28.5, "carbs": 12.0, "fat": 15.0, "serving_size": "1 large bowl (300g)"},
+            {"food_name": "Paneer Butter Masala & Naan (Demo)", "calories": 550, "protein": 18.0, "carbs": 45.0, "fat": 32.0, "serving_size": "1 serving (350g)"},
+            {"food_name": "Masala Dosa (Demo)",                  "calories": 350, "protein": 8.0,  "carbs": 55.0, "fat": 10.0, "serving_size": "1 dosa (200g)"},
+            {"food_name": "Avocado Toast with Egg (Demo)",       "calories": 280, "protein": 14.0, "carbs": 22.0, "fat": 16.0, "serving_size": "2 slices (180g)"},
+            {"food_name": "Chicken Biryani (Demo)",              "calories": 600, "protein": 25.0, "carbs": 70.0, "fat": 20.0, "serving_size": "1 plate (400g)"},
+            {"food_name": "Fruit Smoothie Bowl (Demo)",          "calories": 250, "protein": 5.0,  "carbs": 50.0, "fat": 4.0,  "serving_size": "1 bowl (350g)"},
+            {"food_name": "Grilled Salmon (Demo)",               "calories": 410, "protein": 40.0, "carbs": 2.0,  "fat": 22.0, "serving_size": "1 fillet (200g)"},
+            {"food_name": "Veggie Burger & Fries (Demo)",        "calories": 620, "protein": 16.0, "carbs": 72.0, "fat": 28.0, "serving_size": "1 burger + fries (380g)"},
+            {"food_name": "Greek Yogurt Parfait (Demo)",         "calories": 210, "protein": 12.0, "carbs": 28.0, "fat": 5.0,  "serving_size": "1 cup (250g)"},
+            {"food_name": "Rajma Chawal (Demo)",                 "calories": 520, "protein": 20.0, "carbs": 75.0, "fat": 10.0, "serving_size": "1 plate (420g)"},
+            {"food_name": "Caesar Salad (Demo)",                 "calories": 290, "protein": 10.0, "carbs": 18.0, "fat": 20.0, "serving_size": "1 bowl (280g)"},
+            {"food_name": "Chocolate Lava Cake (Demo)",          "calories": 480, "protein": 6.0,  "carbs": 58.0, "fat": 24.0, "serving_size": "1 piece (120g)"},
         ]
-        chosen = random.choice(mock_foods)
-        
+        chosen = rng.choice(mock_foods)
+
         result = {
             "food_name": chosen["food_name"],
             "calories": chosen["calories"],
             "protein": chosen["protein"],
             "carbs": chosen["carbs"],
             "fat": chosen["fat"],
-            "serving_size": "1 serving",
+            "serving_size": chosen["serving_size"],
             "confidence": "High"
         }
 
     # Deduct 1 credit only on success
-    user.scan_credits = (user.scan_credits or 0) - 1
+    setattr(user, "scan_credits", cast(int, user.scan_credits or 0) - 1)
     db.commit()
 
     return AiScanResponse(
-        food_name=result.get("food_name", "Unknown Food"),
+        food_name=str(result.get("food_name", "Unknown Food")),
         calories=int(result.get("calories", 0)),
         protein=float(result.get("protein", 0)),
         carbs=float(result.get("carbs", 0)),
         fat=float(result.get("fat", 0)),
-        serving_size=result.get("serving_size", "1 serving"),
-        confidence=result.get("confidence", "Medium")
+        serving_size=str(result.get("serving_size", "1 serving")),
+        confidence=str(result.get("confidence", "Medium"))
     )

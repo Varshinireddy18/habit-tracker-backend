@@ -39,6 +39,7 @@ app.include_router(recipe.router)
 
 @app.get("/")
 async def root():
+    # Healthcheck endpoint
     return {
         "message": "Welcome to Habit Tracker & Goal Planner API (MySQL Edition)",
         "docs": "/docs"
